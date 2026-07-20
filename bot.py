@@ -11,34 +11,28 @@ from aiogram.types import (
     Message,
     WebAppInfo,
 )
-import aiohttp
 from aiohttp import web
 
 # --- НАЛАШТУВАННЯ ---
-TELEGRAM_BOT_TOKEN = "ВАШ_TELEGRAM_BOT_TOKEN"
-ALERTS_API_TOKEN = "ВАШ_ALERTS_IN_UA_TOKEN"
+TELEGRAM_BOT_TOKEN = "8841892288:AAHYKuht11w8JzQ21RkdRr_VHgwvdtvMaWA"
 
-# ID регіону згідно з API alerts.in.ua ("31" - м. Київ, "10" - Київська область)
-REGION_ID = "31"
+# ID регіону та назва (для відображення у текстах)
 REGION_NAME = "м. Київ"
 
 # Посилання на онлайн-карту тривог
 MAP_URL = "https://alerts.in.ua/"
 
-# Інтервал перевірки API (у секундах)
-CHECK_INTERVAL = 10
-
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
+# Внутрішній стан бота (у тестовому режимі)
 state = {
     "is_alert": False,
     "start_time": None,
     "last_alert_start": None,
     "last_alert_end": None,
     "subscribers": set(),
-    "pinned_messages": {},
 }
 
 
@@ -46,81 +40,6 @@ def is_night_mode() -> bool:
     """Перевіряє, чи зараз нічний час (23:00 - 07:00)."""
     now = datetime.now().time()
     return now >= time(23, 0) or now < time(7, 0)
-
-
-async def check_alerts_loop():
-    """Фонова задача для періодичної перевірки стану тривоги."""
-    headers = {"Authorization": f"Bearer {ALERTS_API_TOKEN}"}
-    url = f"https://alerts.in.ua/api/v1/alerts/{REGION_ID}.json"
-
-    async with aiohttp.ClientSession() as session:
-        while True:
-            try:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        current_alert = len(data.get("alerts", [])) > 0
-                        await process_alert_change(current_alert)
-            except Exception as e:
-                logging.error(f"Помилка під час запиту до API: {e}")
-
-            await asyncio.sleep(CHECK_INTERVAL)
-
-
-async def process_alert_change(current_alert: bool):
-    """Обробляє зміну стану тривоги та сповіщає користувачів."""
-    now = datetime.now()
-
-    # ПОЧАТОК ТРИВОГИ
-    if current_alert and not state["is_alert"]:
-        state["is_alert"] = True
-        state["start_time"] = now
-        state["last_alert_start"] = now
-
-        disable_sound = is_night_mode()
-
-        for chat_id in list(state["subscribers"]):
-            try:
-                msg = await bot.send_message(
-                    chat_id,
-                    "🚨 <b>Початок тривоги.</b>",
-                    parse_mode=ParseMode.HTML,
-                    disable_notification=disable_sound,
-                )
-                await bot.pin_chat_message(
-                    chat_id, msg.message_id, disable_notification=True
-                )
-                state["pinned_messages"][chat_id] = msg.message_id
-            except Exception as e:
-                logging.error(
-                    f"Не вдалося надіслати/закріпити у чат {chat_id}: {e}"
-                )
-
-    # ВІДБІЙ ТРИВОГИ
-    elif not current_alert and state["is_alert"]:
-        state["is_alert"] = False
-        state["last_alert_end"] = now
-
-        disable_sound = is_night_mode()
-
-        for chat_id in list(state["subscribers"]):
-            try:
-                if chat_id in state["pinned_messages"]:
-                    await bot.unpin_chat_message(
-                        chat_id, state["pinned_messages"][chat_id]
-                    )
-                    del state["pinned_messages"][chat_id]
-
-                await bot.send_message(
-                    chat_id,
-                    "✅ <b>Відбій тривоги.</b>",
-                    parse_mode=ParseMode.HTML,
-                    disable_notification=disable_sound,
-                )
-            except Exception as e:
-                logging.error(
-                    f"Не вдалося надіслати/відкріпити у чат {chat_id}: {e}"
-                )
 
 
 # --- ОБРОБНИКИ КОМАНД ТА ТЕКСТУ ---
@@ -159,7 +78,7 @@ async def cmd_status(message: Message):
     """Формує та надсилає поточний статус тривоги."""
     if state["is_alert"]:
         now = datetime.now()
-        start = state["start_time"]
+        start = state["start_time"] or now
         duration = now - start
         minutes_passed = int(duration.total_seconds() // 60)
 
@@ -202,7 +121,7 @@ async def cmd_status(message: Message):
 
 async def handle_health_check(request):
     """Простий ендпоінт, щоб Render бачив, що сервіс працює."""
-    return web.Response(text="Bot is running!")
+    return web.Response(text="Bot is running in test mode!")
 
 
 async def start_web_server():
@@ -212,15 +131,12 @@ async def start_web_server():
     runner = web.AppRunner(app)
     await runner.setup()
 
-    # Render автоматично передає порт через змінну середовища PORT (за замовчуванням 10000)
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
 
 async def main():
-    # Запускаємо фонову перевірку тривог
-    asyncio.create_task(check_alerts_loop())
     # Запускаємо міні-сервер для Web Service Render
     await start_web_server()
     # Запускаємо бота
