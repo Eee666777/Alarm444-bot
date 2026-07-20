@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, time
 import logging
+import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
@@ -11,6 +12,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 import aiohttp
+from aiohttp import web
 
 # --- НАЛАШТУВАННЯ ---
 TELEGRAM_BOT_TOKEN = "ВАШ_TELEGRAM_BOT_TOKEN"
@@ -26,12 +28,10 @@ MAP_URL = "https://alerts.in.ua/"
 # Інтервал перевірки API (у секундах)
 CHECK_INTERVAL = 10
 
-# Налаштування логування та бота
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# Внутрішній стан бота
 state = {
     "is_alert": False,
     "start_time": None,
@@ -197,9 +197,32 @@ async def cmd_status(message: Message):
     await message.answer(text, parse_mode=ParseMode.HTML)
 
 
+# --- ФІКТИВНИЙ ВЕБ-СЕРВЕР ДЛЯ RENDER WEB SERVICE ---
+
+
+async def handle_health_check(request):
+    """Простий ендпоінт, щоб Render бачив, що сервіс працює."""
+    return web.Response(text="Bot is running!")
+
+
+async def start_web_server():
+    """Запуск сервера на порту, який вимагає Render."""
+    app = web.Application()
+    app.router.add_get("/", handle_health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    # Render автоматично передає порт через змінну середовища PORT (за замовчуванням 10000)
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+
 async def main():
     # Запускаємо фонову перевірку тривог
     asyncio.create_task(check_alerts_loop())
+    # Запускаємо міні-сервер для Web Service Render
+    await start_web_server()
     # Запускаємо бота
     await dp.start_polling(bot)
 
