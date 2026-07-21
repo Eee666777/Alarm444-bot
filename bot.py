@@ -18,10 +18,10 @@ import aiohttp
 from aiohttp import web
 
 # --- НАЛАШТУВАННЯ ---
-TELEGRAM_BOT_TOKEN = "ТВІЙ_TELEGRAM_BOT_TOKEN"
+TELEGRAM_BOT_TOKEN = "8841892288:AAHYKuht11w8JzQ21RkdRr_VHgwvdtvMaWA"
 
 # Отримай токен за 1 хв у Telegram: @ukrainealarm_api_bot
-UKRAINE_ALARM_TOKEN = "ТВІЙ_AJAX_API_TOKEN"
+UKRAINE_ALARM_TOKEN = "12345678:ABCDEfgHIDUROVjkLmNOPQRSTUvw-cdEfgHI"
 
 MAP_URL = "https://alerts.in.ua/"
 CHECK_INTERVAL = 10
