@@ -18,7 +18,7 @@ import aiohttp
 from aiohttp import web
 
 # --- НАЛАШТУВАННЯ ---
-TELEGRAM_BOT_TOKEN = "8841892288:AAHYKuht11w8JzQ21RkdRr_VHgwvdtvMaWA"
+TELEGRAM_BOT_TOKEN = "8841892288:AAEvW9PrcWJ1gD4iVTAw2ouAaNu99V_P55M"
 
 # Отримай токен за 1 хв у Telegram: @ukrainealarm_api_bot
 UKRAINE_ALARM_TOKEN = "12345678:ABCDEfgHIDUROVjkLmNOPQRSTUvw-cdEfgHI"
