@@ -21,10 +21,10 @@ from PIL import Image
 # --- НАЛАШТУВАННЯ ---
 TELEGRAM_BOT_TOKEN = "8841892288:AAEvW9PrcWJ1gD4iVTAw2ouAaNu99V_P55M"
 
-# Пряме посилання на зображення карти (має бути безпосередньо .png / .jpg)
-MAP_IMAGE_URL = "https://alerts.in.ua/map.png"
+# Пряме Raw-посилання на малюнок карти у твоєму репозиторії GitHub
+MAP_IMAGE_URL = "https://raw.githubusercontent.com/Eee666777/Alarm444-bot/main/web.html"
 
-CHECK_INTERVAL = 15  # Перевіряти карту кожні 15 секунд
+CHECK_INTERVAL = 15  # Інтервал перевірки карти (у секундах)
 USERS_FILE = "users.json"
 
 logging.basicConfig(
@@ -69,7 +69,7 @@ REGIONS = {
     "crimea": {"name": "АР Крим", "x": 680, "y": 580},
 }
 
-# Збереження стану тривоги в пам'яті
+# Стан тривог
 regions_state = {
     reg_key: {"is_alert": False, "start_time": None} for reg_key in REGIONS
 }
@@ -128,12 +128,12 @@ def get_regions_keyboard() -> InlineKeyboardMarkup:
 
 
 def is_pixel_red(r: int, g: int, b: int) -> bool:
-    """Визначає, чи є піксель червоним (тривога на карті)."""
+    """Визначає, чи є піксель червоним (повітряна тривога)."""
     return r > 130 and g < 60 and b < 60
 
 
 async def check_alerts_by_image_loop():
-    """Фоновий цикл: завантажує карту (з підміною User-Agent) та аналізує пікселі."""
+    """Фоновий цикл: завантажує карту з GitHub і перевіряє пікселі."""
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -193,7 +193,7 @@ async def check_alerts_by_image_loop():
                                 )
                     else:
                         logging.warning(
-                            f"Не вдалося завантажити карту. Код статусу: {response.status}"
+                            f"Не вдалося завантажити карту з GitHub. Статус: {response.status}"
                         )
             except Exception as e:
                 logging.error(f"Помилка обробки зображення карти: {e}")
@@ -283,11 +283,11 @@ async def cmd_status(message: Message):
     await message.answer(text, parse_mode=ParseMode.HTML)
 
 
-# --- ВЕБ-СЕРВЕР ДЛЯ РЕНДЕРА ---
+# --- ФІКТИВНИЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 
 
 async def handle_health_check(request):
-    return web.Response(text="Pixel Bot is running!")
+    return web.Response(text="Bot is running!")
 
 
 async def start_web_server():
