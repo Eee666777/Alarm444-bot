@@ -21,10 +21,10 @@ from PIL import Image
 # --- НАЛАШТУВАННЯ ---
 TELEGRAM_BOT_TOKEN = "8841892288:AAEvW9PrcWJ1gD4iVTAw2ouAaNu99V_P55M"
 
-# Посилання на пряме зображення карти (PNG або JPG)
+# Пряме посилання на зображення карти (має бути безпосередньо .png / .jpg)
 MAP_IMAGE_URL = "https://alerts.in.ua/map.png"
 
-CHECK_INTERVAL = 15  # Інтервал перевірки карти у секундах
+CHECK_INTERVAL = 15  # Перевіряти карту кожні 15 секунд
 USERS_FILE = "users.json"
 
 logging.basicConfig(
@@ -35,23 +35,46 @@ logging.basicConfig(
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# База регіонів з координатами (X, Y) пікселя на зображенні розміром, наприклад, 1200x800
-# 📌 Скоригуй координати під конкретний розмір вашої карти!
+# --- КООРДИНАТИ ПІКСЕЛІВ ДЛЯ КАРТИ (1024 x 682) ---
 REGIONS = {
-    "kiev": {"name": "м. Київ", "x": 580, "y": 290},
-    "kiev_obl": {"name": "Київська область", "x": 600, "y": 320},
-    "kharkiv": {"name": "Харківська область", "x": 920, "y": 310},
-    "odesa": {"name": "Одеська область", "x": 530, "y": 620},
-    "dnipro": {"name": "Дніпропетровська область", "x": 780, "y": 450},
-    "lviv": {"name": "Львівська область", "x": 210, "y": 330},
+    # Захід
+    "volyn": {"name": "Волинська область", "x": 160, "y": 180},
+    "rivne": {"name": "Рівненська область", "x": 260, "y": 180},
+    "lviv": {"name": "Львівська область", "x": 100, "y": 320},
+    "ternopil": {"name": "Тернопільська область", "x": 200, "y": 360},
+    "ivano-frankivsk": {"name": "Івано-Франківська область", "x": 150, "y": 450},
+    "zakarpattia": {"name": "Закарпатська область", "x": 75, "y": 480},
+    "chernivtsi": {"name": "Чернівецька область", "x": 220, "y": 510},
+    "khmelnytskyi": {"name": "Хмельницька область", "x": 280, "y": 330},
+    # Центр та Північ
+    "zhytomyr": {"name": "Житомирська область", "x": 370, "y": 210},
+    "kyiv_obl": {"name": "Київська область", "x": 480, "y": 280},
+    "kyiv_city": {"name": "м. Київ", "x": 465, "y": 272},
+    "chernihiv": {"name": "Чернігівська область", "x": 520, "y": 150},
+    "sumy": {"name": "Сумська область", "x": 650, "y": 170},
+    "vinnytsia": {"name": "Вінницька область", "x": 370, "y": 420},
+    "cherkasy": {"name": "Черкаська область", "x": 490, "y": 400},
+    "poltava": {"name": "Полтавська область", "x": 610, "y": 330},
+    "kirovohrad": {"name": "Кіровоградська область", "x": 570, "y": 450},
+    # Схід
+    "kharkiv": {"name": "Харківська область", "x": 770, "y": 330},
+    "dnipro": {"name": "Дніпропетровська область", "x": 700, "y": 480},
+    "donetsk": {"name": "Донецька область", "x": 820, "y": 510},
+    "luhansk": {"name": "Луганська область", "x": 930, "y": 420},
+    # Південь
+    "odesa": {"name": "Одеська область", "x": 420, "y": 560},
+    "mykolaiv": {"name": "Миколаївська область", "x": 510, "y": 430},
+    "kherson": {"name": "Херсонська область", "x": 610, "y": 480},
+    "zaporizhzhia": {"name": "Запорізька область", "x": 740, "y": 440},
+    "crimea": {"name": "АР Крим", "x": 680, "y": 580},
 }
 
-# Стан тривог по регіонах: {reg_key: {"is_alert": bool, "start_time": datetime}}
+# Збереження стану тривоги в пам'яті
 regions_state = {
     reg_key: {"is_alert": False, "start_time": None} for reg_key in REGIONS
 }
 
-# --- ЗБЕРЕЖЕННЯ КОРИСТУВАЧІВ ---
+# --- РОБОТА З ФАЙЛОМ КОРИСТУВАЧІВ ---
 
 
 def load_user_regions() -> dict:
@@ -70,7 +93,7 @@ def save_user_regions():
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(user_regions, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logging.error(f"Помилка запису в {USERS_FILE}: {e}")
+        logging.error(f"Помилка запису у {USERS_FILE}: {e}")
 
 
 user_regions = load_user_regions()
@@ -83,14 +106,21 @@ def is_night_mode() -> bool:
 
 def get_regions_keyboard() -> InlineKeyboardMarkup:
     buttons = []
-    for reg_key, reg_data in REGIONS.items():
-        buttons.append(
-            [
+    keys = list(REGIONS.keys())
+    for i in range(0, len(keys), 2):
+        row = [
+            InlineKeyboardButton(
+                text=REGIONS[keys[i]]["name"], callback_data=f"set_reg_{keys[i]}"
+            )
+        ]
+        if i + 1 < len(keys):
+            row.append(
                 InlineKeyboardButton(
-                    text=reg_data["name"], callback_data=f"set_reg_{reg_key}"
+                    text=REGIONS[keys[i + 1]]["name"],
+                    callback_data=f"set_reg_{keys[i + 1]}",
                 )
-            ]
-        )
+            )
+        buttons.append(row)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -98,19 +128,26 @@ def get_regions_keyboard() -> InlineKeyboardMarkup:
 
 
 def is_pixel_red(r: int, g: int, b: int) -> bool:
-    """Визначає, чи є колір пікселя (RGB) 'червоним' (сигналізує про тривогу)."""
-    return r > 160 and g < 100 and b < 100
+    """Визначає, чи є піксель червоним (тривога на карті)."""
+    return r > 130 and g < 60 and b < 60
 
 
 async def check_alerts_by_image_loop():
-    """Фоновий цикл: завантажує карту та перевіряє пікселі для кожного регіону."""
-    async with aiohttp.ClientSession() as session:
+    """Фоновий цикл: завантажує карту (з підміною User-Agent) та аналізує пікселі."""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
+
+    async with aiohttp.ClientSession(headers=headers) as session:
         while True:
             try:
                 async with session.get(MAP_IMAGE_URL) as response:
                     if response.status == 200:
                         image_data = await response.read()
-                        # Відкриваємо зображення та конвертуємо в RGB
                         img = Image.open(BytesIO(image_data)).convert("RGB")
 
                         now = datetime.now()
@@ -119,13 +156,15 @@ async def check_alerts_by_image_loop():
                         for reg_key, reg_info in REGIONS.items():
                             x, y = reg_info["x"], reg_info["y"]
 
-                            # Отримуємо значення RGB пікселя за координатами (x, y)
-                            r, g, b = img.getpixel((x, y))
-                            is_alert_now = is_pixel_red(r, g, b)
+                            try:
+                                r, g, b = img.getpixel((x, y))
+                                is_alert_now = is_pixel_red(r, g, b)
+                            except IndexError:
+                                continue
 
                             st = regions_state[reg_key]
 
-                            # 🚨 ПОЧАТОК ТРИВОГИ (піксель став червоним)
+                            # 🚨 ПОЧАТОК ТРИВОГИ
                             if is_alert_now and not st["is_alert"]:
                                 st["is_alert"] = True
                                 st["start_time"] = now
@@ -140,7 +179,7 @@ async def check_alerts_by_image_loop():
                                     reg_key, text, disable_sound
                                 )
 
-                            # 🟢 ВІДБІЙ ТРИВОГИ (піксель перестав бути червоним)
+                            # 🟢 ВІДБІЙ ТРИВОГИ
                             elif not is_alert_now and st["is_alert"]:
                                 st["is_alert"] = False
                                 text = (
@@ -154,7 +193,7 @@ async def check_alerts_by_image_loop():
                                 )
                     else:
                         logging.warning(
-                            f"Не вдалося завантажити карту. Статус: {response.status}"
+                            f"Не вдалося завантажити карту. Код статусу: {response.status}"
                         )
             except Exception as e:
                 logging.error(f"Помилка обробки зображення карти: {e}")
@@ -183,7 +222,7 @@ async def send_to_subscribers(reg_key: str, text: str, disable_sound: bool):
 async def cmd_start(message: Message):
     chat_id = message.chat.id
     if chat_id not in user_regions:
-        user_regions[chat_id] = "kiev"
+        user_regions[chat_id] = "kyiv_city"
         save_user_regions()
 
     await message.answer(
@@ -202,7 +241,8 @@ async def cb_set_region(callback: CallbackQuery):
 
     await callback.message.edit_text(
         f"✅ Регіон успішно змінено на: <b>{reg_name}</b>\n\n"
-        "• <b>статус</b> — поточна ситуація\n"
+        "Доступні команди:\n"
+        "• <b>статус</b> — поточний стан тривоги\n"
         "• <b>регіон</b> — змінити область/місто",
         parse_mode=ParseMode.HTML,
     )
@@ -217,8 +257,8 @@ async def cmd_change_region(message: Message):
 
 @dp.message(F.text.lower() == "статус")
 async def cmd_status(message: Message):
-    reg_key = user_regions.get(message.chat.id, "kiev")
-    reg_info = REGIONS.get(reg_key, REGIONS["kiev"])
+    reg_key = user_regions.get(message.chat.id, "kyiv_city")
+    reg_info = REGIONS.get(reg_key, REGIONS["kyiv_city"])
     st = regions_state.get(reg_key, {"is_alert": False, "start_time": None})
 
     if st["is_alert"]:
@@ -243,11 +283,11 @@ async def cmd_status(message: Message):
     await message.answer(text, parse_mode=ParseMode.HTML)
 
 
-# --- ФІКТИВНИЙ ВЕБ-СЕРВЕР ДЛЯ RENDER WEB SERVICE ---
+# --- ВЕБ-СЕРВЕР ДЛЯ РЕНДЕРА ---
 
 
 async def handle_health_check(request):
-    return web.Response(text="Pixel Check Bot is running!")
+    return web.Response(text="Pixel Bot is running!")
 
 
 async def start_web_server():
