@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, time
+from datetime import datetime
 from io import BytesIO
 import json
 import logging
@@ -16,20 +16,15 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
 )
-import aiohttp
 from aiohttp import web
 from PIL import Image
+from playwright.async_api import async_playwright
 
 # --- НАЛАШТУВАННЯ ---
 TELEGRAM_BOT_TOKEN = "8841892288:AAEvW9PrcWJ1gD4iVTAw2ouAaNu99V_P55M"
-
-# Джерела та посилання
 MAP_PAGE_URL = "https://alerts.in.ua/"
-MAP_IMAGE_URL = (
-    "https://github.com/Eee666777/Alarm444-bot/blob/main/chrome_proxy.exe"
-)
 
-CHECK_INTERVAL = 15  # Інтервал перевірки карти у секундах
+CHECK_INTERVAL = 30  # Інтервал оновлення через браузер (30 секунд)
 USERS_FILE = "users.json"
 
 logging.basicConfig(
@@ -40,46 +35,46 @@ logging.basicConfig(
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
-# --- КОРДИНАТИ ПІКСЕЛІВ ОБЛАСТЕЙ (1366 x 642) ---
+# --- КООРДИНАТИ ПІКСЕЛІВ ДЛЯ РОЗДІЛЬНОЇ ЗДАТНОСТІ (1366 x 768) ---
 REGIONS = {
     # Захід
-    "volyn": {"name": "Волинська область", "x": 420, "y": 180},
-    "rivne": {"name": "Рівненська область", "x": 480, "y": 180},
-    "lviv": {"name": "Львівська область", "x": 360, "y": 300},
-    "ternopil": {"name": "Тернопільська область", "x": 440, "y": 350},
-    "ivano-frankivsk": {"name": "Івано-Франківська область", "x": 390, "y": 420},
-    "zakarpattia": {"name": "Закарпатська область", "x": 330, "y": 450},
-    "chernivtsi": {"name": "Чернівецька область", "x": 460, "y": 460},
-    "khmelnytskyi": {"name": "Хмельницька область", "x": 510, "y": 320},
+    "volyn": {"name": "Волинська область", "x": 420, "y": 210},
+    "rivne": {"name": "Рівненська область", "x": 480, "y": 210},
+    "lviv": {"name": "Львівська область", "x": 360, "y": 330},
+    "ternopil": {"name": "Тернопільська область", "x": 440, "y": 380},
+    "ivano-frankivsk": {"name": "Івано-Франківська область", "x": 390, "y": 450},
+    "zakarpattia": {"name": "Закарпатська область", "x": 330, "y": 480},
+    "chernivtsi": {"name": "Чернівецька область", "x": 460, "y": 490},
+    "khmelnytskyi": {"name": "Хмельницька область", "x": 510, "y": 350},
     # Центр та Північ
-    "zhytomyr": {"name": "Житомирська область", "x": 570, "y": 230},
-    "kyiv_obl": {"name": "Київська область", "x": 650, "y": 280},
-    "kyiv_city": {"name": "м. Київ", "x": 645, "y": 255},
-    "chernihiv": {"name": "Чернігівська область", "x": 700, "y": 160},
-    "sumy": {"name": "Сумська область", "x": 800, "y": 200},
-    "vinnytsia": {"name": "Вінницька область", "x": 570, "y": 400},
-    "cherkasy": {"name": "Черкаська область", "x": 680, "y": 380},
-    "poltava": {"name": "Полтавська область", "x": 780, "y": 310},
-    "kirovohrad": {"name": "Кіровоградська область", "x": 710, "y": 440},
+    "zhytomyr": {"name": "Житомирська область", "x": 570, "y": 260},
+    "kyiv_obl": {"name": "Київська область", "x": 650, "y": 310},
+    "kyiv_city": {"name": "м. Київ", "x": 645, "y": 285},
+    "chernihiv": {"name": "Чернігівська область", "x": 700, "y": 190},
+    "sumy": {"name": "Сумська область", "x": 800, "y": 230},
+    "vinnytsia": {"name": "Вінницька область", "x": 570, "y": 430},
+    "cherkasy": {"name": "Черкаська область", "x": 680, "y": 410},
+    "poltava": {"name": "Полтавська область", "x": 780, "y": 340},
+    "kirovohrad": {"name": "Кіровоградська область", "x": 710, "y": 470},
     # Схід
-    "kharkiv": {"name": "Харківська область", "x": 900, "y": 330},
-    "dnipro": {"name": "Дніпропетровська область", "x": 840, "y": 450},
-    "donetsk": {"name": "Донецька область", "x": 960, "y": 480},
-    "luhansk": {"name": "Луганська область", "x": 1010, "y": 380},
+    "kharkiv": {"name": "Харківська область", "x": 900, "y": 360},
+    "dnipro": {"name": "Дніпропетровська область", "x": 840, "y": 480},
+    "donetsk": {"name": "Донецька область", "x": 960, "y": 510},
+    "luhansk": {"name": "Луганська область", "x": 1010, "y": 410},
     # Південь
-    "odesa": {"name": "Одеська область", "x": 600, "y": 550},
-    "mykolaiv": {"name": "Миколаївська область", "x": 720, "y": 520},
-    "kherson": {"name": "Херсонська область", "x": 790, "y": 550},
-    "zaporizhzhia": {"name": "Запорізька область", "x": 890, "y": 530},
-    "crimea": {"name": "АР Крим", "x": 840, "y": 620},
+    "odesa": {"name": "Одеська область", "x": 600, "y": 580},
+    "mykolaiv": {"name": "Миколаївська область", "x": 720, "y": 550},
+    "kherson": {"name": "Херсонська область", "x": 790, "y": 580},
+    "zaporizhzhia": {"name": "Запорізька область", "x": 890, "y": 560},
+    "crimea": {"name": "АР Крим", "x": 840, "y": 650},
 }
 
-# Стан кожної області: status = 'CLEAR', 'WARNING', або 'ALERT'
+# Стан областей
 regions_state = {
     reg_key: {"status": "CLEAR", "start_time": None} for reg_key in REGIONS
 }
 
-# --- ЗБЕРЕЖЕННЯ КОРИСТУВАЧІВ ТА ЇХ ОБЛАСТЕЙ (СПИСОК) ---
+# --- МЕНЕДЖЕР ФАЙЛУ КОРИСТУВАЧІВ ---
 
 
 def load_user_regions() -> dict:
@@ -107,23 +102,19 @@ def save_user_regions():
         logging.error(f"Помилка запису у {USERS_FILE}: {e}")
 
 
-# Формат у файлі: {chat_id: ["kyiv_city", "lviv"]}
 user_regions = load_user_regions()
-
-# --- ПЕРЕВІРКА РЕЖИМУ ЗВУКУ ---
 
 
 def is_silent_mode() -> bool:
-    """З 21:00 вечора до 05:59 ранку режим без звуку (True). з 06:00 до 20:59 — зі звуком (False)."""
+    """З 21:00 вечора до 05:59 ранку без звуку, з 06:00 до 20:59 зі звуком."""
     now_hour = datetime.now().hour
     return now_hour >= 21 or now_hour < 6
 
 
-# --- КЛАВІАТУРИ МЕНЮ ---
+# --- КЛАВІАТУРИ ---
 
 
 def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Головне текстове меню бота."""
     kb = [
         [
             KeyboardButton(text="👁 Перегляд підписок"),
@@ -135,10 +126,8 @@ def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_add_regions_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    """Показує список областей, які користувач ще НЕ додав."""
     user_subs = user_regions.get(chat_id, [])
     buttons = []
-
     available_keys = [k for k in REGIONS.keys() if k not in user_subs]
 
     for i in range(0, len(available_keys), 2):
@@ -168,7 +157,6 @@ def get_add_regions_keyboard(chat_id: int) -> InlineKeyboardMarkup:
 
 
 def get_subscribed_regions_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    """Показує список обраних областей для подальшого вибору/видалення."""
     user_subs = user_regions.get(chat_id, [])
     buttons = []
 
@@ -192,114 +180,113 @@ def get_subscribed_regions_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-# --- ДЕТЕКЦІЯ КОЛЬОРІВ КАРТИ ---
+# --- ДЕТЕКЦІЯ КОЛЬОРІВ ---
 
 
 def detect_pixel_status(r: int, g: int, b: int) -> str:
-    # Жовтий / Помаранчевий (Підвищена небезпека)
+    # Помаранчевий / Жовтий (Підвищена небезпека)
     if r > 150 and g > 80 and b < 80:
         return "WARNING"
-    # Червоний / Червоно-коричневий (Повітряна тривога)
+    # Червоний (Повітряна тривога)
     if r > 80 and r > g + 30 and r > b + 30:
         return "ALERT"
-    # Спокійно
+    # Фоновий колір (Відбій / Спокійно)
     return "CLEAR"
 
 
-# --- ФОНОВИЙ ЦИКЛ ПЕРЕВІРКИ КАРТИ ---
+# --- РОБОТА З PLAYWRIGHT (АВТОМАТИЧНИЙ БРАУЗЕР) ---
 
 
-async def check_alerts_by_image_loop():
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
+async def check_alerts_with_playwright_loop():
+    async with async_playwright() as p:
+        # Запускаємо фоновий Chromium з імітацією звичайного користувача
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"],
         )
-    }
 
-    async with aiohttp.ClientSession(headers=headers) as session:
+        context = await browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        )
+
+        page = await context.new_page()
+
         while True:
             try:
-                async with session.get(MAP_IMAGE_URL) as response:
-                    if response.status == 200:
-                        image_data = await response.read()
-                        img = Image.open(BytesIO(image_data)).convert("RGB")
+                # Відкриваємо сайт alerts.in.ua
+                await page.goto(
+                    MAP_PAGE_URL, wait_until="networkidle", timeout=60000
+                )
 
-                        now = datetime.now()
-                        disable_sound = (
-                            is_silent_mode()
-                        )  # Без звуку з 21:00 до 05:59
+                # Даємо додаткові 3 секунди на проходження перевірки Cloudflare та малювання canvas
+                await asyncio.sleep(3)
 
-                        for reg_key, reg_info in REGIONS.items():
-                            x, y = reg_info["x"], reg_info["y"]
+                # Робимо скріншот усієї сторінки прямо в оперативну пам'ять
+                screenshot_bytes = await page.screenshot()
+                img = Image.open(BytesIO(screenshot_bytes)).convert("RGB")
 
-                            try:
-                                r, g, b = img.getpixel((x, y))
-                                current_status = detect_pixel_status(r, g, b)
-                            except IndexError:
-                                continue
+                now = datetime.now()
+                disable_sound = is_silent_mode()
 
-                            st = regions_state[reg_key]
-                            old_status = st["status"]
+                for reg_key, reg_info in REGIONS.items():
+                    x, y = reg_info["x"], reg_info["y"]
 
-                            if current_status != old_status:
-                                st["status"] = current_status
-                                st["start_time"] = now
+                    try:
+                        r, g, b = img.getpixel((x, y))
+                        current_status = detect_pixel_status(r, g, b)
+                    except IndexError:
+                        continue
 
-                                sound_status_str = (
-                                    "🔕 (Без звуку - Нічний режим)"
-                                    if disable_sound
-                                    else "🔊 (Зі звуком)"
-                                )
+                    st = regions_state[reg_key]
+                    old_status = st["status"]
 
-                                if current_status == "ALERT":
-                                    text = (
-                                        f"🚨 <b>ПОЧАТОК ТРИВОГИ!</b> {sound_status_str}\n\n"
-                                        f"📍 <b>Регіон:</b> {reg_info['name']}\n"
-                                        f"🕒 <b>Час:</b> {now.strftime('%H:%M')}\n\n"
-                                        f"Прямуйте в укриття! 🛡️\n"
-                                        f"🔗 Мапа: {MAP_PAGE_URL}"
-                                    )
-                                    await send_to_subscribers(
-                                        reg_key, text, disable_sound
-                                    )
+                    if current_status != old_status:
+                        st["status"] = current_status
+                        st["start_time"] = now
 
-                                elif current_status == "WARNING":
-                                    text = (
-                                        f"⚠️ <b>ПІДВИЩЕНА НЕБЕЗПЕКА!</b> {sound_status_str}\n\n"
-                                        f"📍 <b>Регіон:</b> {reg_info['name']}\n"
-                                        f"🕒 <b>Час:</b> {now.strftime('%H:%M')}\n\n"
-                                        f"Будьте особливо уважні! ⚠️\n"
-                                        f"🔗 Мапа: {MAP_PAGE_URL}"
-                                    )
-                                    await send_to_subscribers(
-                                        reg_key, text, disable_sound
-                                    )
-
-                                elif current_status == "CLEAR":
-                                    text = (
-                                        f"✅ <b>ВІДБІЙ ТРИВОГИ!</b> {sound_status_str}\n\n"
-                                        f"📍 <b>Регіон:</b> {reg_info['name']}\n"
-                                        f"🕒 <b>Час:</b> {now.strftime('%H:%M')}\n\n"
-                                        f"Можна залишати укриття. 🟢\n"
-                                        f"🔗 Мапа: {MAP_PAGE_URL}"
-                                    )
-                                    await send_to_subscribers(
-                                        reg_key, text, disable_sound
-                                    )
-                    else:
-                        logging.warning(
-                            f"Завантаження карти повернуло статус: {response.status}"
+                        sound_str = (
+                            "🔕 (Без звуку)" if disable_sound else "🔊 (Зі звуком)"
                         )
+
+                        if current_status == "ALERT":
+                            text = (
+                                f"🚨 <b>ПОЧАТОК ТРИВОГИ!</b> {sound_str}\n\n"
+                                f"📍 <b>Регіон:</b> {reg_info['name']}\n"
+                                f"🕒 <b>Час:</b> {now.strftime('%H:%M')}\n\n"
+                                f"Прямуйте в укриття! 🛡️\n"
+                                f"🔗 Джерело: {MAP_PAGE_URL}"
+                            )
+                        elif current_status == "WARNING":
+                            text = (
+                                f"⚠️ <b>ПІДВИЩЕНА НЕБЕЗПЕКА!</b> {sound_str}\n\n"
+                                f"📍 <b>Регіон:</b> {reg_info['name']}\n"
+                                f"🕒 <b>Час:</b> {now.strftime('%H:%M')}\n\n"
+                                f"Будьте уважні! ⚠️\n"
+                                f"🔗 Джерело: {MAP_PAGE_URL}"
+                            )
+                        else:
+                            text = (
+                                f"✅ <b>ВІДБІЙ ТРИВОГИ!</b> {sound_str}\n\n"
+                                f"📍 <b>Регіон:</b> {reg_info['name']}\n"
+                                f"🕒 <b>Час:</b> {now.strftime('%H:%M')}\n\n"
+                                f"Можна залишати укриття. 🟢\n"
+                                f"🔗 Джерело: {MAP_PAGE_URL}"
+                            )
+
+                        await send_to_subscribers(reg_key, text, disable_sound)
+
             except Exception as e:
-                logging.error(f"Помилка фонової перевірки: {e}")
+                logging.error(f"Помилка рендерингу сторінки Chromium: {e}")
 
             await asyncio.sleep(CHECK_INTERVAL)
 
 
 async def send_to_subscribers(reg_key: str, text: str, disable_sound: bool):
-    """Надсилає повідомлення лише тим користувачам, які підписані на дану область."""
     for chat_id, user_subs in list(user_regions.items()):
         if reg_key in user_subs:
             try:
@@ -310,7 +297,7 @@ async def send_to_subscribers(reg_key: str, text: str, disable_sound: bool):
                     disable_notification=disable_sound,
                 )
             except Exception as e:
-                logging.error(f"Помилка відправки в chat_id {chat_id}: {e}")
+                logging.error(f"Не вдалося надіслати у чат {chat_id}: {e}")
 
 
 # --- ОБРОБНИКИ КОМАНД І КНОПОК ---
@@ -320,11 +307,11 @@ async def send_to_subscribers(reg_key: str, text: str, disable_sound: bool):
 async def cmd_start(message: Message):
     chat_id = message.chat.id
     if chat_id not in user_regions:
-        user_regions[chat_id] = ["kyiv_city"]  # За замовчуванням
+        user_regions[chat_id] = ["kyiv_city"]
         save_user_regions()
 
     await message.answer(
-        "Вітаю! Оберіть необхідну дію в меню нижче.\n\n"
+        "Вітаю! Бот автоматично сканує карту alerts.in.ua через підключений браузер.\n\n"
         "⏰ <b>Режим сповіщень:</b>\n"
         "• 06:00 - 20:59 — 🔊 <b>Зі звуком</b>\n"
         "• 21:00 - 05:59 — 🔕 <b>Без звуку (Нічний режим)</b>",
@@ -333,7 +320,6 @@ async def cmd_start(message: Message):
     )
 
 
-# 1. ПЕРЕГЛЯД ПІДПИСОК
 @dp.message(F.text == "👁 Перегляд підписок")
 async def cmd_view_subscriptions(message: Message):
     chat_id = message.chat.id
@@ -341,8 +327,7 @@ async def cmd_view_subscriptions(message: Message):
 
     if not subs:
         await message.answer(
-            "У вас немає обраних областей. Натисніть '➕ Додати область'.",
-            reply_markup=get_main_menu_keyboard(),
+            "У вас немає обраних областей. Натисніть '➕ Додати область'."
         )
         return
 
@@ -352,7 +337,6 @@ async def cmd_view_subscriptions(message: Message):
     )
 
 
-# 2. ДОДАТИ ОБЛАСТЬ
 @dp.message(F.text == "➕ Додати область")
 async def cmd_add_region(message: Message):
     chat_id = message.chat.id
@@ -362,12 +346,9 @@ async def cmd_add_region(message: Message):
         await message.answer("Ви вже підписані на всі доступні області!")
         return
 
-    await message.answer(
-        "Оберіть область зі списку, яку бажаєте додати:", reply_markup=kb
-    )
+    await message.answer("Оберіть область зі списку:", reply_markup=kb)
 
 
-# Додавання області через інлайн кнопу
 @dp.callback_query(F.data.startswith("add_reg_"))
 async def cb_add_region(callback: CallbackQuery):
     chat_id = callback.message.chat.id
@@ -380,17 +361,15 @@ async def cb_add_region(callback: CallbackQuery):
         user_regions[chat_id].append(reg_key)
 
     reg_name = REGIONS.get(reg_key, {}).get("name", reg_key)
-
     await callback.answer(f"Додано: {reg_name}")
-    # Оновлюємо список кнопок без уже доданої області
+
     await callback.message.edit_text(
-        f"✅ Додано <b>{reg_name}</b>.\nМожете обрати ще або натиснути 'Зберегти':",
+        f"✅ Додано <b>{reg_name}</b>.\nОберіть ще або натисніть 'Зберегти':",
         reply_markup=get_add_regions_keyboard(chat_id),
         parse_mode=ParseMode.HTML,
     )
 
 
-# Вибір області з обраних для видалення
 @dp.callback_query(F.data.startswith("select_sub_"))
 async def cb_select_sub(callback: CallbackQuery):
     reg_key = callback.data.replace("select_sub_", "")
@@ -413,13 +392,12 @@ async def cb_select_sub(callback: CallbackQuery):
     )
 
     await callback.message.edit_text(
-        f"Ви обрали область: <b>{reg_name}</b>\nБажаєте видалити її з підписок?",
+        f"Ви обрали: <b>{reg_name}</b>\nБажаєте видалити її з підписок?",
         reply_markup=kb,
         parse_mode=ParseMode.HTML,
     )
 
 
-# Видалення області
 @dp.callback_query(F.data.startswith("delete_reg_"))
 async def cb_delete_region(callback: CallbackQuery):
     chat_id = callback.message.chat.id
@@ -432,13 +410,12 @@ async def cb_delete_region(callback: CallbackQuery):
     await callback.answer(f"Видалено: {reg_name}")
 
     await callback.message.edit_text(
-        f"❌ Область <b>{reg_name}</b> видалено.\nОновлений список підписок:",
+        f"❌ Область <b>{reg_name}</b> видалено.\nОновлений список:",
         reply_markup=get_subscribed_regions_keyboard(chat_id),
         parse_mode=ParseMode.HTML,
     )
 
 
-# Повернення до списку підписок
 @dp.callback_query(F.data == "back_to_subs")
 async def cb_back_to_subs(callback: CallbackQuery):
     chat_id = callback.message.chat.id
@@ -448,23 +425,21 @@ async def cb_back_to_subs(callback: CallbackQuery):
     )
 
 
-# 3. КНОПКА ЗБЕРЕГТИ
 @dp.message(F.text == "💾 Зберегти")
 @dp.callback_query(F.data == "save_changes")
 async def save_and_confirm(event):
     chat_id = (
         event.chat.id if isinstance(event, Message) else event.message.chat.id
     )
-
     save_user_regions()
 
     subs = user_regions.get(chat_id, [])
     names = [REGIONS.get(k, {}).get("name", k) for k in subs]
 
     text_msg = (
-        "💾 <b>Налаштування успішно збережено!</b>\n\n"
-        "Ваш актуальний список областей для сповіщень:\n"
-        + ("\n".join([f"• {name}" for name in names]) if names else "<i>Список порожній</i>")
+        "💾 <b>Збережено!</b>\n\n"
+        "Ваші області для сповіщень:\n"
+        + ("\n".join([f"• {name}" for name in names]) if names else "<i>Порожньо</i>")
     )
 
     if isinstance(event, CallbackQuery):
@@ -478,16 +453,13 @@ async def save_and_confirm(event):
         )
 
 
-# 4. СТАТУС ОБРАНИХ ОБЛАСТЕЙ
 @dp.message(F.text == "📊 Статус")
 async def cmd_status(message: Message):
     chat_id = message.chat.id
     subs = user_regions.get(chat_id, [])
 
     if not subs:
-        await message.answer(
-            "У вас не обрано жодної області. Додайте області за допомогою '➕ Додати область'."
-        )
+        await message.answer("У вас не обрано жодної області!")
         return
 
     now = datetime.now()
@@ -517,11 +489,11 @@ async def cmd_status(message: Message):
     await message.answer("\n".join(text_lines), parse_mode=ParseMode.HTML)
 
 
-# --- ФІКТИВНИЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ---
+# --- ФІКТИВНИЙ СЕРВЕР ДЛЯ RENDER ---
 
 
 async def handle_health_check(request):
-    return web.Response(text="Bot with Multi-Region support is running!")
+    return web.Response(text="Browser Bot is running!")
 
 
 async def start_web_server():
@@ -536,7 +508,7 @@ async def start_web_server():
 
 
 async def main():
-    asyncio.create_task(check_alerts_by_image_loop())
+    asyncio.create_task(check_alerts_with_playwright_loop())
     await start_web_server()
     await dp.start_polling(bot)
 
